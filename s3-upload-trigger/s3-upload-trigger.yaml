@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >-
+  An Amazon S3 trigger that retrieves metadata for the object that has been
+  updated.
+
+# > sam validate --template ./s3-upload-trigger.yaml
+# > sam deploy --template-file ./s3-upload-trigger.yaml --stack-name S3-Upload-Triggered-Lambda --region us-west-1 --tags "type=proof-of-concept" "description=Lambda triggered via a signed S3 upload" --parameter-overrides s3PackageBucket=signed-upload-packages-us-west-1 s3SignedUploadWithHttpApiStackName=S3-Signed-Upload --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+#
+# Bucket events are only supported for buckets created in the SAM template itself (not existing buckets), however,
+# An automated workaround can be found here
+#     https://github.com/aws/serverless-application-model/issues/124#issuecomment-511779961
+# Alternatively, if you are testing, you can just add the S3 integration from the lambda function overview
+# using the AWS console. If you can make a new bucket as part of the template, that is great for CI builds
+# and deployments. In my experience though, there has always been an existing bucket. 
+
+Parameters:
+  s3SignedUploadWithHttpApiStackName:
+    Type: "String"
+    Default: "S3-Signed-Upload"
+  s3PackageBucket:
+    Type: "String"
+    AllowedPattern: "^[a-zA-Z0-9]+[a-zA-Z0-9-]+[a-zA-Z0-9]+$"
+    Default: "signed-upload-packages-us-west-1"
+  s3UploadTriggerLambdaPackage:
+    Type: "String"
+    AllowedPattern: "^[a-zA-Z0-9].*.zip$"
+    Default: "s3-upload-lambda-trigger.zip"
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::Region}-${AWS::StackName}-LambdaExecTrigger"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub "${AWS::Region}-${AWS::StackName}-CustomS3UploadTrigger"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Sid: VisualEditor0
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObjectAcl
+                - s3:GetObject
+                - s3:ListBucketMultipartUploads
+                - s3:ListBucketVersions
+                - s3:ListBucket
+                - s3:PutObjectAcl
+                - s3:ListMultipartUploadParts
+              Resource:           
+                - Fn::Sub: 
+                  - "arn:aws:s3:::${S3BucketArg1}/"
+                  - S3BucketArg1: 
+                      Fn::ImportValue: !Sub "${s3SignedUploadWithHttpApiStackName}-S3UploadBucketName"    
+                - Fn::Sub:
+                  - "arn:aws:s3:::${S3BucketArg2}/*"
+                  - S3BucketArg2: 
+                      Fn::ImportValue: !Sub "${s3SignedUploadWithHttpApiStackName}-S3UploadBucketName"
+            - Sid: VisualEditor1
+              Effect: Allow
+              Action: s3:ListAllMyBuckets
+              Resource: "*"
+  DevBookManagerS3UploadTrigger:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs14.x
+      CodeUri:
+        Bucket: !Ref s3PackageBucket
+        Key: !Ref s3UploadTriggerLambdaPackage
+      Description: >-
+        An Amazon S3 trigger that retrieves metadata for the object that has
+        been updated.
+      MemorySize: 128
+      Timeout: 3
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+
+

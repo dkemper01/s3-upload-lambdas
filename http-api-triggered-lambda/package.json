@@ -1,0 +1,11 @@
+{
+  "name": "get-s3-signed-url",
+  "version": "1.0.0",
+  "description": "Gets a signed URL for file upload",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.26.0",
+    "@aws-sdk/s3-request-presigner": "^3.26.0",
+    "node-fetch": "^2.6.1"
+  }
+}

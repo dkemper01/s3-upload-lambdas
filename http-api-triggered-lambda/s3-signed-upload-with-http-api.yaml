@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >-
+  This lambda calls the S3 API to return a signed URL good for a configurable
+  period of time.
+
+# > sam validate --template ./s3-signed-upload-with-http-api.yaml
+# > sam deploy --template-file ./s3-signed-upload-with-http-api.yaml --stack-name S3-Signed-Upload --region us-west-1 --tags "type=proof-of-concept" "description=Signed S3 uploads with upload trigger" --parameter-overrides s3PackageBucket=signed-upload-packages-us-west-1 --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+
+Parameters:
+  s3UploadBucket:
+    Type: "String"
+    AllowedPattern: "^[a-zA-Z0-9]+[a-zA-Z0-9-]+[a-zA-Z0-9]+$"
+    Default: "signed-uploads"
+
+  s3PackageBucket:
+    Type: "String"
+    AllowedPattern: "^[a-zA-Z0-9]+[a-zA-Z0-9-]+[a-zA-Z0-9]+$"
+    Default: "signed-upload-packages-us-west-1"
+
+  s3UploadLambdaPackage:
+    Type: "String"
+    AllowedPattern: "^[a-zA-Z0-9].*.zip$"
+    Default: "s3-signed-upload-lambda.zip"
+
+  throttlingRate:
+    Type: Number
+    Default: 100
+  
+  burstRate: 
+    Type: Number
+    Default: 50
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::Region}-${AWS::StackName}-LambdaExecUploadRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub "${AWS::Region}-${AWS::StackName}-CustomS3UploadPolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Sid: VisualEditor0
+              Effect: Allow
+              Action:
+              - s3:PutObject
+              - s3:GetObjectAcl
+              - s3:GetObject
+              - s3:ListBucketMultipartUploads
+              - s3:ListBucketVersions
+              - s3:ListBucket
+              - s3:PutObjectAcl
+              - s3:ListMultipartUploadParts
+              Resource:
+                - !Sub "arn:aws:s3:::${s3UploadBucket}/"
+                - !Sub "arn:aws:s3:::${s3UploadBucket}/*"
+            - Sid: VisualEditor1
+              Effect: Allow
+              Action: s3:ListAllMyBuckets
+              Resource: "*"
+  
+  SignedUploadApi:
+    Type: 'AWS::Serverless::HttpApi'
+    Properties:
+      CorsConfiguration:
+        AllowMethods:
+          - GET
+          - PUT
+          - POST
+          - OPTIONS
+        AllowHeaders: 
+          - "*"
+        AllowOrigins:
+          - "*"
+
+  DevBookManagerS3SignedURL:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs14.x
+      CodeUri:
+        Bucket: !Ref s3PackageBucket
+        Key: !Ref s3UploadLambdaPackage
+      Description: >-
+        This lambda calls the S3 API to return a signed URL good for a
+        configurable period of time.
+      MemorySize: 128
+      Timeout: 6
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        ApiGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SignedUploadApi
+            RouteSettings:
+              ThrottlingBurstLimit: !Ref burstRate
+              ThrottlingRateLimit: !Ref throttlingRate
+      Environment:
+        Variables:
+          bucket: !Ref s3UploadBucket
+          region: us-west-1
+Outputs:
+  S3UploadBucketRef:
+    Value: !Ref s3UploadBucket
+    Description: Name of the S3 bucket where uploads will be stored
+    Export: 
+      Name: !Sub "${AWS::StackName}-S3UploadBucketName"
